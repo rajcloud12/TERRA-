@@ -210,3 +210,5 @@ resource "aws_instance" "privt-ec2" {
     "Name" : "private-ece"
   }
 }
+
+#need to practice
