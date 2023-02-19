@@ -1,0 +1,212 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+  }
+}
+
+# Configure the AWS Provider
+provider "aws" {
+  region = "ap-south-1"
+}
+
+#vpc 
+
+resource "aws_vpc" "myvpc" {
+  cidr_block       = "10.0.0.0/16"
+  instance_tenancy = "default"
+
+  tags = {
+    Name = "my-vpc-tf"
+  }
+}
+
+#subnet
+
+resource "aws_subnet" "pubsub" {
+  vpc_id     = aws_vpc.myvpc.id
+  cidr_block = "10.0.1.0/24"
+
+  tags = {
+    Name = "pub-sub"
+  }
+
+
+
+availability_zone ="ap-south-1a"
+}
+
+resource "aws_subnet" "prvtsub" {
+  vpc_id     = aws_vpc.myvpc.id
+  cidr_block = "10.0.2.0/24"
+
+  tags = {
+    Name = "prvt-sub"
+  }
+
+
+availability_zone ="ap-south-1b"
+}
+  #IGW
+
+  resource "aws_internet_gateway" "igt" {
+  vpc_id = aws_vpc.myvpc.id
+
+  tags = {
+    Name = "my-igt"
+  }
+}
+
+#route
+
+resource "aws_route_table" "pubrt" {
+  vpc_id = aws_vpc.myvpc.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.igt.id
+  }
+
+
+  tags = {
+    Name = "pub-rt"
+  }
+}
+
+#association
+
+resource "aws_route_table_association" "pubasso" {
+  subnet_id      = aws_subnet.pubsub.id
+  route_table_id = aws_route_table.pubrt.id
+}
+
+
+
+
+# ELASTIC IP
+
+resource "aws_eip" "elaip" {
+  vpc      = true
+}
+
+#NAT
+
+resource "aws_nat_gateway" "nat" {
+  allocation_id = aws_eip.elaip.id
+  subnet_id     = aws_subnet.pubsub.id
+
+  tags = {
+    Name = "MY-VPC-NAT"
+  }
+}
+
+#private rt
+
+resource "aws_route_table" "prvrt" {
+  vpc_id = aws_vpc.myvpc.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_nat_gateway.nat.id
+  }
+
+
+  tags = {
+    Name = "privt-rt"
+  }
+}
+
+  resource "aws_route_table_association" "prvtasso" {
+  subnet_id      = aws_subnet.prvtsub.id
+  route_table_id = aws_route_table.prvrt.id
+}
+
+#PUBLIC SG
+
+resource "aws_security_group" "pubsg" {
+  name        = "pubsg"
+  description = "Allow TLS inbound traffic"
+  vpc_id      = aws_vpc.myvpc.id
+
+  ingress {
+    description      = "TLS from VPC"
+    from_port        = 22
+    to_port          = 22
+    protocol         = "tcp"
+    cidr_blocks      = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = ["::/0"]
+  }
+
+  tags = {
+    Name = "pubsg"
+  }
+}
+
+#PRVT SG
+
+resource "aws_security_group" "prvtsg" {
+  name        = "prvtsg"
+  description = "Allow TLS inbound traffic"
+  vpc_id      = aws_vpc.myvpc.id
+
+  ingress {
+    description      = "TLS from VPC"
+    from_port        = 22
+    to_port          = 22
+    protocol         = "tcp"
+    cidr_blocks      = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["10.0.1.0/24"]
+    
+  }
+
+  tags = {
+    Name = "pubsg"
+  }
+}
+
+#ec2 instance
+
+resource "aws_instance" "public-ec2" {
+  ami           = "ami-0e742cca61fb65051"
+  instance_type = "t2.micro"
+  key_name      = "mumbai-linux" #just key name, dont apply extension with name
+
+  subnet_id                   = aws_subnet.pubsub.id
+  vpc_security_group_ids      = [aws_security_group.pubsg.id]
+  associate_public_ip_address = true
+
+  tags = {
+    "Name" : "public-ec2"
+  }
+}
+
+
+resource "aws_instance" "privt-ec2" {
+  ami           = "ami-0e742cca61fb65051"
+  instance_type = "t2.micro"
+  key_name      = "mumbai-linux"  #just key name, dont apply extension with name
+
+  subnet_id                   = aws_subnet.prvtsub.id
+  vpc_security_group_ids      = [aws_security_group.prvtsg.id]
+  associate_public_ip_address = true
+
+
+  tags = {
+    "Name" : "private-ece"
+  }
+}
